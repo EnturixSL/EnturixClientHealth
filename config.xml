@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+
+    <!--
+        ClientShare (required)
+        UNC or local path to the folder that contains ccmsetup.exe.
+        When the client is healthy, the script caches ccmsetup.exe from
+        C:\Windows\CCMSetup into this folder for use during future repairs.
+    -->
+    <ClientShare>C:\ProgramData\ClientHealth</ClientShare>
+
+    <!--
+        ClientInstallProperties (optional)
+        Space-separated properties passed directly to ccmsetup.exe on install.
+        Leave the element empty if no extra properties are needed.
+        Example: SMSSITECODE=P01 SMSMP=sccm.contoso.com
+    -->
+    <ClientInstallProperties>SMSSITECODE=TB1</ClientInstallProperties>
+
+    <!--
+        LogPath (optional)
+        Directory where the timestamped log file is written.
+        Defaults to C:\EnturixClientHealth if omitted or left empty.
+    -->
+    <LogPath>C:\Windows\Logs\SCCMClientHealth</LogPath>
+
+</Configuration>

@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Enturix SCCM Client Health — Detect and Remediate
+    Enturix SCCM Client Health - Detect and Remediate
 
 .DESCRIPTION
     Runs ConfigMgr Client Health checks (based on ConfigMgrClientHealth by Anders Rødland)
@@ -11,7 +11,15 @@
     (based on SCCMagentRepair by Biju George) and then reinstalls the SCCM client via
     ccmsetup.exe instead of CCMRepair.exe.
 
+    All settings are read from an XML configuration file (default: config.xml in the
+    same directory as this script). The following XML elements are supported:
+
+        <ClientShare>            - (required) UNC or local path to the folder containing ccmsetup.exe
+        <ClientInstallProperties>- (optional) ccmsetup.exe install properties
+        <LogPath>                - (optional) directory where the log file is written
+
     Health checks performed:
+        * Task Sequence running (exits immediately if true — no repairs performed)
         * CcmExec service running
         * CCM local database files present (*.sdf count >= 7)
         * CCM database not corrupt (CcmSQLCE.log)
@@ -24,35 +32,25 @@
         3. Clear CCM cache directories
         4. Reinstall SCCM client via ccmsetup.exe (uninstall + install)
 
-.PARAMETER ClientShare
-    UNC or local path to the folder containing ccmsetup.exe.
-    Example: \\sccm.contoso.com\Client$
-
-.PARAMETER ClientInstallProperties
-    ccmsetup.exe install properties passed to the installer.
-    Example: SMSSITECODE=P01 SMSMP=sccm.contoso.com
-
-.PARAMETER LogPath
-    Directory where the log file is written. Defaults to C:\EnturixClientHealth.
+.PARAMETER ConfigFile
+    Path to the XML configuration file.
+    Defaults to config.xml in the same directory as this script.
 
 .EXAMPLE
-    .\EnturixClientHealth.ps1 -ClientShare "\\sccm.contoso.com\Client$" -ClientInstallProperties "SMSSITECODE=P01 SMSMP=sccm.contoso.com"
+    .\EnturixClientHealth.ps1
+
+.EXAMPLE
+    .\EnturixClientHealth.ps1 -ConfigFile "\\server\share\EnturixClientHealth\config.xml"
 
 .NOTES
-    Author: Enturix — sebastian.linn@enturix.de
+    Author: Enturix - sebastian.linn@enturix.de
     Health check logic: ConfigMgrClientHealth (Anders Rødland, https://www.andersrodland.com)
     Repair step logic: SCCMagentRepair (Biju George)
 #>
 
 param(
-    [Parameter(Mandatory = $true, HelpMessage = 'UNC path to folder containing ccmsetup.exe')]
-    [string]$ClientShare,
-
-    [Parameter(Mandatory = $false, HelpMessage = 'ccmsetup.exe install properties')]
-    [string]$ClientInstallProperties = '',
-
-    [Parameter(Mandatory = $false)]
-    [string]$LogPath = 'C:\EnturixClientHealth'
+    [Parameter(Mandatory = $false, HelpMessage = 'Path to the XML configuration file')]
+    [string]$ConfigFile = (Join-Path $PSScriptRoot 'config.xml')
 )
 
 Set-StrictMode -Version Latest
@@ -62,7 +60,7 @@ $PowerShellVersion = [int]$PSVersionTable.PSVersion.Major
 #region --- Logging ---
 
 $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$LogFile   = Join-Path $LogPath "EnturixClientHealth.$Timestamp.log"
+$LogFile   = $null   # set after LogPath is loaded from config
 
 function Write-Log {
     param(
@@ -97,7 +95,7 @@ function Test-CcmSDF {
     $ccmDir = Get-CCMDirectory
     $files  = @(Get-ChildItem "$ccmDir\*.sdf" -ErrorAction SilentlyContinue)
     if ($files.Count -lt 7) {
-        Write-Log "CcmSDF check: FAIL — only $($files.Count) SDF files found (expected >= 7)." 'WARN'
+        Write-Log "CcmSDF check: FAIL - only $($files.Count) SDF files found (expected >= 7)." 'WARN'
         return $false
     }
     Write-Log "CcmSDF check: OK ($($files.Count) SDF files present)."
@@ -127,7 +125,7 @@ function Test-CcmSQLCELog {
 
     # Bad: log was written recently but is not newly created (ongoing corruption)
     if ( (($now - $lastWrite).Days -lt 7) -and (($now - $created).Days -gt 7) ) {
-        Write-Log "CcmSQLCELog check: FAIL — CcmSQLCE.log exists and was recently updated. DB corrupt." 'WARN'
+        Write-Log "CcmSQLCELog check: FAIL - CcmSQLCE.log exists and was recently updated. DB corrupt." 'WARN'
         return $true
     }
 
@@ -154,7 +152,7 @@ function Test-WMIHealth {
     catch { $vote++ }
 
     if ($vote -gt 0) {
-        Write-Log "WMI health check: FAIL — repository inconsistent or Win32_ComputerSystem unreachable." 'WARN'
+        Write-Log "WMI health check: FAIL - repository inconsistent or Win32_ComputerSystem unreachable." 'WARN'
         return $true
     }
     Write-Log "WMI health check: OK."
@@ -165,7 +163,7 @@ function Test-WMIHealth {
 function Test-CcmExecService {
     $svc = Get-Service -Name ccmexec -ErrorAction SilentlyContinue
     if (-not $svc) {
-        Write-Log "CcmExec service check: FAIL — service not found." 'WARN'
+        Write-Log "CcmExec service check: FAIL - service not found." 'WARN'
         return $true
     }
 
@@ -177,7 +175,7 @@ function Test-CcmExecService {
             return $false
         }
         catch {
-            Write-Log "CcmExec service check: FAIL — service stopped and could not be started." 'WARN'
+            Write-Log "CcmExec service check: FAIL - service stopped and could not be started." 'WARN'
             return $true
         }
     }
@@ -195,7 +193,7 @@ function Test-CcmWMIClass {
         return $false
     }
     catch {
-        Write-Log "SMS_Client WMI class check: FAIL — cannot access root/ccm SMS_Client." 'WARN'
+        Write-Log "SMS_Client WMI class check: FAIL - cannot access root/ccm SMS_Client." 'WARN'
         # Clear CCM WMI namespace to avoid needing a full uninstall
         try { Get-WmiObject -Query "Select * from __Namespace WHERE Name='CCM'" -Namespace root -ErrorAction SilentlyContinue | Remove-WmiObject }
         catch {}
@@ -203,12 +201,34 @@ function Test-CcmWMIClass {
     }
 }
 
+# Returns $true if a Task Sequence is currently executing (OSD or software deployment).
+# When a TS is running all repairs are skipped to avoid disrupting the deployment.
+function Test-RunningTaskSequence {
+    # Primary indicator: TSManager.exe process created by the TS engine
+    if (Get-Process -Name TSManager -ErrorAction SilentlyContinue) {
+        Write-Log "Task Sequence check: ACTIVE - TSManager.exe is running. Skipping all repairs." 'WARN'
+        return $true
+    }
+
+    # Secondary indicator: Active Request Handle written by the TS engine
+    $activeHandle = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\SMS\Task Sequence' `
+                                      -Name 'Active Request Handle' `
+                                      -ErrorAction SilentlyContinue).'Active Request Handle'
+    if ($activeHandle) {
+        Write-Log "Task Sequence check: ACTIVE - Active Request Handle found in registry. Skipping all repairs." 'WARN'
+        return $true
+    }
+
+    Write-Log "Task Sequence check: OK - no running Task Sequence detected."
+    return $false
+}
+
 # Returns $true if client is stuck in Provisioning Mode.
 function Test-ProvisioningMode {
     $key   = 'HKLM:\SOFTWARE\Microsoft\CCM\CcmExec'
     $mode  = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).ProvisioningMode
     if ($mode -eq 'true') {
-        Write-Log "Provisioning Mode check: FAIL — client is stuck in provisioning mode. Remediating..." 'WARN'
+        Write-Log "Provisioning Mode check: FAIL - client is stuck in provisioning mode. Remediating..." 'WARN'
         Set-ItemProperty -Path $key -Name ProvisioningMode -Value 'false' -ErrorAction SilentlyContinue
         try {
             if ($PowerShellVersion -ge 6) {
@@ -229,11 +249,32 @@ function Test-ProvisioningMode {
 
 #region --- Repair Functions (logic from SCCMagentRepair by Biju George) ---
 
+function Get-WinMgmtState {
+    (& "$env:SystemRoot\System32\sc.exe" query winmgmt) -join ' '
+}
+
 function Repair-WMIRepository {
     Write-Log "Repairing WMI repository..."
 
-    Stop-Service -Name ccmexec -Force -ErrorAction SilentlyContinue
-    Stop-Service -Name winmgmt -Force -ErrorAction SilentlyContinue
+    # Disable auto-start so SCM cannot restart winmgmt after we force-kill it
+    & "$env:SystemRoot\System32\sc.exe" config winmgmt start= demand 2>&1 | Out-Null
+
+    # Use sc.exe stop (non-blocking) so we never hang on a corrupt WMI service
+    & "$env:SystemRoot\System32\sc.exe" stop ccmexec 2>&1 | Out-Null
+    & "$env:SystemRoot\System32\sc.exe" stop winmgmt 2>&1 | Out-Null
+
+    # Wait up to 30 s for winmgmt to fully stop; force-kill if still pending
+    for ($i = 0; $i -lt 15; $i++) {
+        if ((Get-WinMgmtState) -match 'STOPPED') { break }
+        Start-Sleep -Seconds 2
+    }
+    if ((Get-WinMgmtState) -notmatch 'STOPPED') {
+        Write-Log "WinMgmt stuck in StopPending - force killing process..." 'WARN'
+        $scOut  = (& "$env:SystemRoot\System32\sc.exe" queryex winmgmt) -join ' '
+        $svcPid = ([regex]::Match($scOut, 'PID\s*:\s*(\d+)')).Groups[1].Value
+        if ($svcPid) { cmd.exe /c "taskkill /PID $svcPid /F" 2>&1 | Out-Null }
+        Start-Sleep -Seconds 5  # let SCM register the death before resetrepository runs
+    }
 
     # Re-register WMI binaries
     foreach ($wbemPath in @("$env:SystemRoot\System32\wbem", "$env:SystemRoot\SysWOW64\wbem")) {
@@ -246,9 +287,20 @@ function Repair-WMIRepository {
         }
     }
 
-    & "$env:SystemRoot\system32\wbem\winmgmt.exe" /resetrepository  | Out-Null
-    & "$env:SystemRoot\system32\wbem\winmgmt.exe" /salvagerepository | Out-Null
+    # Rename the corrupt repository so WinMgmt rebuilds it from scratch on next start.
+    # This avoids winmgmt.exe /resetrepository which hangs while SCM is in STOP_PENDING.
+    $repoPath    = "$env:SystemRoot\System32\wbem\Repository"
+    $repoPathOld = "$env:SystemRoot\System32\wbem\Repository.old"
+    if (Test-Path $repoPath) {
+        if (Test-Path $repoPathOld) {
+            Remove-Item -Path $repoPathOld -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Rename-Item -Path $repoPath -NewName 'Repository.old' -Force -ErrorAction SilentlyContinue
+        Write-Log "Renamed WMI repository to Repository.old - WinMgmt will rebuild on start."
+    }
 
+    # Restore auto-start before restarting the service
+    & "$env:SystemRoot\System32\sc.exe" config winmgmt start= auto 2>&1 | Out-Null
     Start-Service -Name winmgmt -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 10
     Write-Log "WMI repository repair complete."
@@ -347,9 +399,9 @@ function Invoke-CCMSetupReinstall {
         Write-Log "Uninstall complete."
     }
 
-    # Install client
+    # Install client - split properties into individual arguments
     Write-Log "Installing SCCM client: $ccmSetup $InstallProperties"
-    if ($InstallProperties) { & $ccmSetup $InstallProperties }
+    if ($InstallProperties) { & $ccmSetup ($InstallProperties -split '\s+') }
     else                     { & $ccmSetup }
 
     do {
@@ -359,7 +411,7 @@ function Invoke-CCMSetupReinstall {
     # Verify service appeared
     $svc = Get-Service -Name ccmexec -ErrorAction SilentlyContinue
     if ($svc) {
-        Write-Log "SCCM client reinstall complete — CcmExec service detected."
+        Write-Log "SCCM client reinstall complete - CcmExec service detected."
         return $true
     }
     else {
@@ -398,19 +450,52 @@ function Test-PostRepairHealth {
 
 #region --- Main ---
 
-# Ensure log directory exists
+# --- Load XML configuration ---
+if (-not (Test-Path $ConfigFile)) {
+    Write-Error "Configuration file not found: $ConfigFile"
+    exit 3
+}
+
+try {
+    [xml]$cfg = Get-Content $ConfigFile -Encoding UTF8 -ErrorAction Stop
+}
+catch {
+    Write-Error "Failed to parse configuration file '$ConfigFile': $_"
+    exit 3
+}
+
+$ClientShare             = ($cfg.Configuration.ClientShare             -as [string]).Trim()
+$ClientInstallProperties = ($cfg.Configuration.ClientInstallProperties -as [string]).Trim()
+$LogPath                 = ($cfg.Configuration.LogPath                 -as [string]).Trim()
+
+if (-not $ClientShare) {
+    Write-Error "Configuration error: <ClientShare> is missing or empty in '$ConfigFile'."
+    exit 3
+}
+if (-not $LogPath) { $LogPath = 'C:\EnturixClientHealth' }
+
+# Ensure log directory exists and set log file path
 if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
+$LogFile = Join-Path $LogPath "EnturixClientHealth.$Timestamp.log"
 
 Write-Log "=== Enturix Client Health started ==="
-Write-Log "Computer  : $env:COMPUTERNAME"
-Write-Log "User      : $env:USERNAME"
-Write-Log "PSVersion : $($PSVersionTable.PSVersion)"
+Write-Log "Computer   : $env:COMPUTERNAME"
+Write-Log "User       : $env:USERNAME"
+Write-Log "PSVersion  : $($PSVersionTable.PSVersion)"
+Write-Log "ConfigFile : $ConfigFile"
 Write-Log "ClientShare: $ClientShare"
+
+# --- Task Sequence guard ---
+if (Test-RunningTaskSequence) {
+    Write-Log "=== Task Sequence in progress - exiting without repair to avoid disruption. ==="
+    exit 0
+}
 
 # --- Run health checks ---
 Write-Log "--- Running health checks ---"
 
-$needsRepair   = $false
+$needsRepair    = $false
+$needsWMIRepair = $false
 $needsUninstall = $false
 
 # 1. CcmExec service
@@ -422,10 +507,10 @@ if (-not (Test-CcmSDF)) { $needsRepair = $true; $needsUninstall = $true }
 # 3. DB corruption log
 if (Test-CcmSQLCELog)   { $needsRepair = $true; $needsUninstall = $true }
 
-# 4. WMI health
-if (Test-WMIHealth)     { $needsRepair = $true }
+# 4. WMI health - only triggers WMI-specific repair
+if (Test-WMIHealth)     { $needsRepair = $true; $needsWMIRepair = $true }
 
-# 5. SMS_Client WMI class
+# 5. SMS_Client WMI class - SCCM reinstall only, not WMI repair
 if (Test-CcmWMIClass)   { $needsRepair = $true }
 
 # 6. Provisioning mode (self-remediating, flag for awareness only)
@@ -433,14 +518,51 @@ Test-ProvisioningMode | Out-Null
 
 if (-not $needsRepair) {
     Write-Log "=== All health checks passed. No repair needed. ==="
+
+    # --- Cache ccmsetup.exe locally for future repairs ---
+    $ccmSetupSource = 'C:\Windows\CCMSetup\ccmsetup.exe'
+    $ccmSetupCache  = 'C:\ProgramData\ClientHealth'
+
+    if (Test-Path $ccmSetupSource) {
+        try {
+            if (-not (Test-Path $ccmSetupCache)) {
+                New-Item -ItemType Directory -Path $ccmSetupCache -Force | Out-Null
+            }
+
+            $ccmSetupDest = Join-Path $ccmSetupCache 'ccmsetup.exe'
+            $sourceHash   = (Get-FileHash -Path $ccmSetupSource -Algorithm SHA256 -ErrorAction Stop).Hash
+            $destHash     = if (Test-Path $ccmSetupDest) {
+                                (Get-FileHash -Path $ccmSetupDest -Algorithm SHA256 -ErrorAction Stop).Hash
+                            } else { $null }
+
+            if ($sourceHash -eq $destHash) {
+                Write-Log "ccmsetup.exe cache is up to date (SHA256: $sourceHash) - skipping copy."
+            }
+            else {
+                Copy-Item -Path $ccmSetupSource -Destination $ccmSetupCache -Force -ErrorAction Stop
+                Write-Log "Cached ccmsetup.exe to $ccmSetupCache (SHA256: $sourceHash)."
+            }
+        }
+        catch {
+            Write-Log "WARNING: Could not cache ccmsetup.exe to ${ccmSetupCache}: $_" 'WARN'
+        }
+    }
+    else {
+        Write-Log "ccmsetup.exe not found at $ccmSetupSource - skipping cache." 'WARN'
+    }
+
     exit 0
 }
 
 Write-Log "=== Health checks indicate client needs repair. Starting remediation... ==="
 
-# --- Step 1: Repair WMI ---
+# --- Step 1: Repair WMI (only when WMI itself is broken) ---
 Write-Log "--- Step 1: WMI repair ---"
-Repair-WMIRepository
+if ($needsWMIRepair) {
+    Repair-WMIRepository
+} else {
+    Write-Log "WMI is healthy - skipping WMI repair."
+}
 
 # --- Step 2: Reset policy cache ---
 Write-Log "--- Step 2: Policy cache reset ---"
