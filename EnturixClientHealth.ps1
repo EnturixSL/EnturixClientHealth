@@ -59,8 +59,7 @@ $PowerShellVersion = [int]$PSVersionTable.PSVersion.Major
 
 #region --- Logging ---
 
-$Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$LogFile   = $null   # set after LogPath is loaded from config
+$LogFile = $null   # set after LogPath is loaded from config
 
 function Write-Log {
     param(
@@ -476,7 +475,7 @@ if (-not $LogPath) { $LogPath = 'C:\EnturixClientHealth' }
 
 # Ensure log directory exists and set log file path
 if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
-$LogFile = Join-Path $LogPath "EnturixClientHealth.$Timestamp.log"
+$LogFile = Join-Path $LogPath "EnturixClientHealth.log"
 
 Write-Log "=== Enturix Client Health started ==="
 Write-Log "Computer   : $env:COMPUTERNAME"
