@@ -46,3 +46,5 @@ For support or inquiries: [sebastian.linn@enturix.de](mailto:sebastian.linn@entu
 ---
 
 &copy; Enturix — All rights reserved.
+
+Last updated: 2026-03-12 10:06:39
