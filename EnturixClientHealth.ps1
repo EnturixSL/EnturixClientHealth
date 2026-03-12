@@ -69,11 +69,15 @@ function Write-Log {
     $entry = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message"
     Write-Host $entry
     if ($LogFile) {
-        # Rotate at 2 MB: keep one previous archive (.1), delete older ones
+        # Rotate at 2 MB: rename to timestamped archive, delete any older archives
         if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -ge 2MB) {
-            $archive = "$LogFile.1"
-            if (Test-Path $archive) { Remove-Item $archive -Force -ErrorAction SilentlyContinue }
-            Rename-Item -Path $LogFile -NewName "$([System.IO.Path]::GetFileName($LogFile)).1" -Force -ErrorAction SilentlyContinue
+            $stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
+            $logDir  = [System.IO.Path]::GetDirectoryName($LogFile)
+            $logBase = [System.IO.Path]::GetFileNameWithoutExtension($LogFile)
+            $logExt  = [System.IO.Path]::GetExtension($LogFile)
+            Get-ChildItem -Path $logDir -Filter "${logBase}_*${logExt}" -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+            Rename-Item -Path $LogFile -NewName "${logBase}_${stamp}${logExt}" -Force -ErrorAction SilentlyContinue
         }
         Add-Content -Path $LogFile -Value $entry -ErrorAction SilentlyContinue
     }
