@@ -368,7 +368,7 @@ function Reset-SCCMPolicyCache {
     Write-Log "Policy cache reset complete."
 }
 
-function Clear-CCMCache {
+function Clear-CCMTempFiles {
     Write-Log "Clearing CCM cache directories..."
 
     Stop-Service -Name ccmexec -Force -ErrorAction SilentlyContinue
@@ -650,7 +650,7 @@ Reset-SCCMPolicyCache
 
 # --- Step 3: Clear CCM cache ---
 Write-Log "--- Step 3: CCM cache clear ---"
-Clear-CCMCache
+Clear-CCMTempFiles
 
 # --- Step 4: Reinstall SCCM client via ccmsetup.exe ---
 Write-Log "--- Step 4: SCCM client reinstall ---"

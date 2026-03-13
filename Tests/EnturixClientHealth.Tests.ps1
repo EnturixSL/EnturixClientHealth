@@ -807,9 +807,9 @@ Describe 'Reset-SCCMPolicyCache' {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Clear-CCMCache
+#  Clear-CCMTempFiles
 # ══════════════════════════════════════════════════════════════════════════════
-Describe 'Clear-CCMCache' {
+Describe 'Clear-CCMTempFiles' {
     BeforeEach {
         Mock Write-Log    {}
         Mock Stop-Service {}
@@ -818,13 +818,13 @@ Describe 'Clear-CCMCache' {
 
     It 'stops CcmExec service' {
         Mock Test-Path    { $false }
-        Clear-CCMCache
+        Clear-CCMTempFiles
         Should -Invoke Stop-Service -ParameterFilter { $Name -eq 'ccmexec' } -Exactly 1
     }
 
     It 'waits 5 seconds after stopping the service' {
         Mock Test-Path    { $false }
-        Clear-CCMCache
+        Clear-CCMTempFiles
         Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 5 } -Exactly 1
     }
 
@@ -836,12 +836,12 @@ Describe 'Clear-CCMCache' {
         }
 
         It 'does not call Get-ChildItem' {
-            Clear-CCMCache
+            Clear-CCMTempFiles
             Should -Invoke Get-ChildItem -Exactly 0
         }
 
         It 'completes without throwing' {
-            { Clear-CCMCache } | Should -Not -Throw
+            { Clear-CCMTempFiles } | Should -Not -Throw
         }
     }
 
@@ -855,17 +855,17 @@ Describe 'Clear-CCMCache' {
         }
 
         It 'calls Get-ChildItem for all three directories' {
-            Clear-CCMCache
+            Clear-CCMTempFiles
             Should -Invoke Get-ChildItem -Exactly 3
         }
 
         It 'calls Remove-Item for each discovered file' {
-            Clear-CCMCache
+            Clear-CCMTempFiles
             Should -Invoke Remove-Item -Exactly 3
         }
 
         It 'completes without throwing' {
-            { Clear-CCMCache } | Should -Not -Throw
+            { Clear-CCMTempFiles } | Should -Not -Throw
         }
     }
 
@@ -880,7 +880,7 @@ Describe 'Clear-CCMCache' {
         }
 
         It 'calls Get-ChildItem exactly once' {
-            Clear-CCMCache
+            Clear-CCMTempFiles
             Should -Invoke Get-ChildItem -Exactly 1
         }
     }
