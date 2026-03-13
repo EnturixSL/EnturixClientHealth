@@ -591,7 +591,7 @@ if (-not $needsRepair) {
 
     # --- Cache ccmsetup.exe locally for future repairs ---
     $ccmSetupSource = 'C:\Windows\CCMSetup\ccmsetup.exe'
-    $ccmSetupCache  = 'C:\ProgramData\ClientHealth'
+    $ccmSetupCache  = $ClientShare
 
     if (Test-Path $ccmSetupSource) {
         try {
