@@ -25,6 +25,7 @@
             <WMIHealth>          - verify WMI repository consistency
             <CcmWMIClass>        - verify SMS_Client class is accessible
             <ProvisioningMode>   - detect/remediate clients stuck in Provisioning Mode
+            <CCMClientSDK>       - verify root\ccm\ClientSDK is accessible (Software Center data layer)
 
     Health checks performed:
         * Task Sequence running (exits immediately if true — no repairs performed)
@@ -262,6 +263,24 @@ function Test-ProvisioningMode {
     }
     Write-Log "Provisioning Mode check: OK."
     return $false
+}
+
+# Returns $true if the CCM_ClientSDK WMI namespace (used by Software Center) is inaccessible.
+function Test-CCMClientSDK {
+    try {
+        if ($PowerShellVersion -ge 6) {
+            Get-CimInstance -Namespace 'root\ccm\ClientSDK' -ClassName 'CCM_Application' -ErrorAction Stop | Out-Null
+        }
+        else {
+            Get-WmiObject -Namespace 'root\ccm\ClientSDK' -Class 'CCM_Application' -ErrorAction Stop | Out-Null
+        }
+        Write-Log "CCM ClientSDK check: OK - root\ccm\ClientSDK is accessible."
+        return $false
+    }
+    catch {
+        Write-Log "CCM ClientSDK check: FAIL - root\ccm\ClientSDK unreachable (Software Center data layer broken)." 'WARN'
+        return $true
+    }
 }
 
 #endregion
@@ -506,6 +525,7 @@ $checkCcmSQLCELog    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmSQLCELog  
 $checkWMIHealth      = Read-CheckSwitch ($cfg.Configuration.Checks.WMIHealth       -as [string])
 $checkCcmWMIClass    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmWMIClass     -as [string])
 $checkProvisioningMode = Read-CheckSwitch ($cfg.Configuration.Checks.ProvisioningMode -as [string])
+$checkCCMClientSDK     = Read-CheckSwitch ($cfg.Configuration.Checks.CCMClientSDK      -as [string])
 
 # Ensure log directory exists and set log file path
 if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
@@ -560,6 +580,11 @@ if ($checkCcmWMIClass) {
 if ($checkProvisioningMode) {
     Test-ProvisioningMode | Out-Null
 } else { Write-Log "Provisioning Mode check: skipped (disabled in config)." }
+
+# 7. CCM ClientSDK namespace (Software Center data layer)
+if ($checkCCMClientSDK) {
+    if (Test-CCMClientSDK) { $needsRepair = $true }
+} else { Write-Log "CCM ClientSDK check: skipped (disabled in config)." }
 
 if (-not $needsRepair) {
     Write-Log "=== All health checks passed. No repair needed. ==="

@@ -36,6 +36,7 @@
         WMIHealth       - Verify WMI repository consistency and Win32_ComputerSystem access
         CcmWMIClass     - Verify the SMS_Client class is accessible in root/ccm
         ProvisioningMode- Detect and auto-remediate clients stuck in Provisioning Mode
+        CCMClientSDK    - Verify root\ccm\ClientSDK is accessible (Software Center data layer)
     -->
     <Checks>
         <TaskSequence>true</TaskSequence>
@@ -45,6 +46,7 @@
         <WMIHealth>true</WMIHealth>
         <CcmWMIClass>true</CcmWMIClass>
         <ProvisioningMode>true</ProvisioningMode>
+        <CCMClientSDK>true</CCMClientSDK>
     </Checks>
 
 </Configuration>
