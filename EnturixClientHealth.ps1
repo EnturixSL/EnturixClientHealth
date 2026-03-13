@@ -14,6 +14,7 @@
     All settings are read from an XML configuration file (default: config.xml in the
     same directory as this script). The following XML elements are supported:
 
+        <CheckOnly>              - (optional) true = run checks only, never repair (default: false)
         <ClientShare>            - (required) UNC or local path to the folder containing ccmsetup.exe
         <ClientInstallProperties>- (optional) ccmsetup.exe install properties
         <LogPath>                - (optional) directory where the log file is written
@@ -527,6 +528,10 @@ $checkCcmWMIClass    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmWMIClass  
 $checkProvisioningMode = Read-CheckSwitch ($cfg.Configuration.Checks.ProvisioningMode -as [string])
 $checkCCMClientSDK     = Read-CheckSwitch ($cfg.Configuration.Checks.CCMClientSDK      -as [string])
 
+# --- Check-only mode: run all checks but skip all repairs (defaults to false) ---
+$checkOnlyRaw = ($cfg.Configuration.CheckOnly -as [string]).Trim()
+$checkOnly    = (-not [string]::IsNullOrWhiteSpace($checkOnlyRaw)) -and ($checkOnlyRaw -eq 'true')
+
 # Ensure log directory exists and set log file path
 if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
 $LogFile = Join-Path $LogPath "EnturixClientHealth.log"
@@ -622,6 +627,11 @@ if (-not $needsRepair) {
     }
 
     exit 0
+}
+
+if ($checkOnly) {
+    Write-Log "=== Check-only mode: repairs skipped. Client needs attention. ===" 'WARN'
+    exit 1
 }
 
 Write-Log "=== Health checks indicate client needs repair. Starting remediation... ==="

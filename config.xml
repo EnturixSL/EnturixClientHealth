@@ -38,6 +38,14 @@
         ProvisioningMode- Detect and auto-remediate clients stuck in Provisioning Mode
         CCMClientSDK    - Verify root\ccm\ClientSDK is accessible (Software Center data layer)
     -->
+    <!--
+        CheckOnly (optional)
+        Set to true to run all checks and log results without performing any repairs.
+        The script exits with code 1 if issues are found, 0 if healthy.
+        Defaults to false if omitted or left empty.
+    -->
+    <CheckOnly>false</CheckOnly>
+
     <Checks>
         <TaskSequence>true</TaskSequence>
         <CcmExecService>true</CcmExecService>
