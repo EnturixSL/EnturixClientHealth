@@ -24,4 +24,27 @@
     -->
     <LogPath>C:\Windows\Logs\SCCMClientHealth</LogPath>
 
+    <!--
+        Checks (optional)
+        Set any check to false to skip it entirely.
+        All checks default to true if the element is missing or empty.
+
+        TaskSequence    - Exit immediately if a Task Sequence is running (recommended: true)
+        CcmExecService  - Verify the SMS Agent Host service is running
+        CcmSDF          - Verify >= 7 .sdf database files exist in the CCM directory
+        CcmSQLCELog     - Detect ongoing CCM database corruption via CcmSQLCE.log
+        WMIHealth       - Verify WMI repository consistency and Win32_ComputerSystem access
+        CcmWMIClass     - Verify the SMS_Client class is accessible in root/ccm
+        ProvisioningMode- Detect and auto-remediate clients stuck in Provisioning Mode
+    -->
+    <Checks>
+        <TaskSequence>true</TaskSequence>
+        <CcmExecService>true</CcmExecService>
+        <CcmSDF>true</CcmSDF>
+        <CcmSQLCELog>true</CcmSQLCELog>
+        <WMIHealth>true</WMIHealth>
+        <CcmWMIClass>true</CcmWMIClass>
+        <ProvisioningMode>true</ProvisioningMode>
+    </Checks>
+
 </Configuration>

@@ -17,6 +17,14 @@
         <ClientShare>            - (required) UNC or local path to the folder containing ccmsetup.exe
         <ClientInstallProperties>- (optional) ccmsetup.exe install properties
         <LogPath>                - (optional) directory where the log file is written
+        <Checks>                 - (optional) per-check true/false toggles (all default to true):
+            <TaskSequence>       - exit immediately if a Task Sequence is running
+            <CcmExecService>     - verify SMS Agent Host service is running
+            <CcmSDF>             - verify >= 7 .sdf database files exist
+            <CcmSQLCELog>        - detect ongoing CCM database corruption
+            <WMIHealth>          - verify WMI repository consistency
+            <CcmWMIClass>        - verify SMS_Client class is accessible
+            <ProvisioningMode>   - detect/remediate clients stuck in Provisioning Mode
 
     Health checks performed:
         * Task Sequence running (exits immediately if true — no repairs performed)
@@ -485,6 +493,20 @@ if (-not $ClientShare) {
 }
 if (-not $LogPath) { $LogPath = 'C:\EnturixClientHealth' }
 
+# --- Load check toggles (default true when element is missing/empty) ---
+function Read-CheckSwitch {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $true }
+    return ($Value.Trim() -ne 'false')
+}
+$checkTaskSequence   = Read-CheckSwitch ($cfg.Configuration.Checks.TaskSequence   -as [string])
+$checkCcmExecService = Read-CheckSwitch ($cfg.Configuration.Checks.CcmExecService -as [string])
+$checkCcmSDF         = Read-CheckSwitch ($cfg.Configuration.Checks.CcmSDF         -as [string])
+$checkCcmSQLCELog    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmSQLCELog    -as [string])
+$checkWMIHealth      = Read-CheckSwitch ($cfg.Configuration.Checks.WMIHealth       -as [string])
+$checkCcmWMIClass    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmWMIClass     -as [string])
+$checkProvisioningMode = Read-CheckSwitch ($cfg.Configuration.Checks.ProvisioningMode -as [string])
+
 # Ensure log directory exists and set log file path
 if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
 $LogFile = Join-Path $LogPath "EnturixClientHealth.log"
@@ -497,7 +519,7 @@ Write-Log "ConfigFile : $ConfigFile"
 Write-Log "ClientShare: $ClientShare"
 
 # --- Task Sequence guard ---
-if (Test-RunningTaskSequence) {
+if ($checkTaskSequence -and (Test-RunningTaskSequence)) {
     Write-Log "=== Task Sequence in progress - exiting without repair to avoid disruption. ==="
     exit 0
 }
@@ -510,22 +532,34 @@ $needsWMIRepair = $false
 $needsUninstall = $false
 
 # 1. CcmExec service
-if (Test-CcmExecService) { $needsRepair = $true }
+if ($checkCcmExecService) {
+    if (Test-CcmExecService) { $needsRepair = $true }
+} else { Write-Log "CcmExec service check: skipped (disabled in config)." }
 
 # 2. Local DB files
-if (-not (Test-CcmSDF)) { $needsRepair = $true; $needsUninstall = $true }
+if ($checkCcmSDF) {
+    if (-not (Test-CcmSDF)) { $needsRepair = $true; $needsUninstall = $true }
+} else { Write-Log "CcmSDF check: skipped (disabled in config)." }
 
 # 3. DB corruption log
-if (Test-CcmSQLCELog)   { $needsRepair = $true; $needsUninstall = $true }
+if ($checkCcmSQLCELog) {
+    if (Test-CcmSQLCELog) { $needsRepair = $true; $needsUninstall = $true }
+} else { Write-Log "CcmSQLCELog check: skipped (disabled in config)." }
 
 # 4. WMI health - only triggers WMI-specific repair
-if (Test-WMIHealth)     { $needsRepair = $true; $needsWMIRepair = $true }
+if ($checkWMIHealth) {
+    if (Test-WMIHealth) { $needsRepair = $true; $needsWMIRepair = $true }
+} else { Write-Log "WMI health check: skipped (disabled in config)." }
 
 # 5. SMS_Client WMI class - SCCM reinstall only, not WMI repair
-if (Test-CcmWMIClass)   { $needsRepair = $true }
+if ($checkCcmWMIClass) {
+    if (Test-CcmWMIClass) { $needsRepair = $true }
+} else { Write-Log "SMS_Client WMI class check: skipped (disabled in config)." }
 
 # 6. Provisioning mode (self-remediating, flag for awareness only)
-Test-ProvisioningMode | Out-Null
+if ($checkProvisioningMode) {
+    Test-ProvisioningMode | Out-Null
+} else { Write-Log "Provisioning Mode check: skipped (disabled in config)." }
 
 if (-not $needsRepair) {
     Write-Log "=== All health checks passed. No repair needed. ==="
