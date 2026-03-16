@@ -156,23 +156,23 @@ function Test-CcmSQLCELog {
 
 # Returns $true if WMI is broken (inconsistent repo or cannot query Win32_ComputerSystem).
 function Test-WMIHealth {
-    $vote   = 0
-    $result = & winmgmt /verifyrepository 2>&1
+    $NeedRepair = $false
+    $result     = & winmgmt /verifyrepository 2>&1
     switch -Wildcard ($result) {
-        '*inconsistent*'    { $vote = 100 }
-        '*not consistent*'  { $vote = 100 }
-        '*inkonsekvent*'    { $vote = 100 }
-        '*inkonsistent*'    { $vote = 100 }
-        '*epäyhtenäinen*'   { $vote = 100 }
+        '*inconsistent*'    { $NeedRepair = $true }
+        '*not consistent*'  { $NeedRepair = $true }
+        '*inkonsekvent*'    { $NeedRepair = $true }
+        '*inkonsistent*'    { $NeedRepair = $true }
+        '*epäyhtenäinen*'   { $NeedRepair = $true }
     }
 
     try {
         if ($PowerShellVersion -ge 6) { Get-CimInstance Win32_ComputerSystem -ErrorAction Stop | Out-Null }
         else                          { Get-WmiObject  Win32_ComputerSystem -ErrorAction Stop  | Out-Null }
     }
-    catch { $vote++ }
+    catch { $NeedRepair = $true }
 
-    if ($vote -gt 0) {
+    if ($NeedRepair) {
         Write-Log "WMI health check: FAIL - repository inconsistent or Win32_ComputerSystem unreachable." 'WARN'
         return $true
     }

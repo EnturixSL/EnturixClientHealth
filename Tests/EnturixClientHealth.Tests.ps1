@@ -414,8 +414,8 @@ Describe 'Test-WMIHealth' {
         BeforeEach {
             Mock Get-WmiObject { throw 'WMI RPC unavailable' }
         }
-        It 'returns $true (vote incremented by exception)' {
-            # winmgmt returns consistent (vote=0), but WMI query fails (vote=1) → broken
+        It 'returns $true ($NeedRepair set by exception)' {
+            # winmgmt returns consistent ($NeedRepair=$false), but WMI query fails → broken
             Test-WMIHealth | Should -BeTrue
         }
     }
