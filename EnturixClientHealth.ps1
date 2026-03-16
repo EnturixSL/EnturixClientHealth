@@ -39,7 +39,7 @@
     Remediation steps (if any check fails):
         1. Repair WMI repository
         2. Reset SCCM policy cache (registry)
-        3. Clear CCM cache directories
+        3. Clean up CCM temp files
         4. Reinstall SCCM client via ccmsetup.exe (uninstall + install)
 
 .PARAMETER ConfigFile
@@ -369,7 +369,7 @@ function Reset-SCCMPolicyCache {
 }
 
 function Clear-CCMTempFiles {
-    Write-Log "Clearing CCM cache directories..."
+    Write-Log "Cleaning up CCM temp files..."
 
     Stop-Service -Name ccmexec -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
@@ -382,7 +382,7 @@ function Clear-CCMTempFiles {
         }
     }
 
-    Write-Log "CCM cache cleared."
+    Write-Log "CCM temp files cleaned up."
 }
 
 #endregion
@@ -648,8 +648,8 @@ if ($needsWMIRepair) {
 Write-Log "--- Step 2: Policy cache reset ---"
 Reset-SCCMPolicyCache
 
-# --- Step 3: Clear CCM cache ---
-Write-Log "--- Step 3: CCM cache clear ---"
+# --- Step 3: Clean up CCM temp files ---
+Write-Log "--- Step 3: Clean up CCM temp files ---"
 Clear-CCMTempFiles
 
 # --- Step 4: Reinstall SCCM client via ccmsetup.exe ---
