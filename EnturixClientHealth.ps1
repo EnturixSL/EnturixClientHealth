@@ -528,7 +528,8 @@ $checkCcmWMIClass    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmWMIClass  
 $checkProvisioningMode = Read-CheckSwitch ($cfg.Configuration.Checks.ProvisioningMode -as [string])
 $checkCCMClientSDK     = Read-CheckSwitch ($cfg.Configuration.Checks.CCMClientSDK      -as [string])
 
-# --- Check-only mode: run all checks but skip all repairs (defaults to false) ---
+# --- Check-only mode: intentionally defaults to false (unlike check toggles which default to true)
+#     because silently skipping all repairs would be a surprising/unsafe default. ---
 $checkOnlyRaw = ($cfg.Configuration.CheckOnly -as [string]).Trim()
 $checkOnly    = (-not [string]::IsNullOrWhiteSpace($checkOnlyRaw)) -and ($checkOnlyRaw -eq 'true')
 
@@ -600,21 +601,26 @@ if (-not $needsRepair) {
 
     if (Test-Path $ccmSetupSource) {
         try {
-            if (-not (Test-Path $ccmSetupCache)) {
-                New-Item -ItemType Directory -Path $ccmSetupCache -Force | Out-Null
-            }
+            New-Item -ItemType Directory -Path $ccmSetupCache -Force -ErrorAction Stop | Out-Null
 
             $ccmSetupDest = Join-Path $ccmSetupCache 'ccmsetup.exe'
-            $sourceHash   = (Get-FileHash -Path $ccmSetupSource -Algorithm SHA256 -ErrorAction Stop).Hash
-            $destHash     = if (Test-Path $ccmSetupDest) {
-                                (Get-FileHash -Path $ccmSetupDest -Algorithm SHA256 -ErrorAction Stop).Hash
-                            } else { $null }
+            $sourceItem   = Get-Item -Path $ccmSetupSource -ErrorAction Stop
+            $destItem     = Get-Item -Path $ccmSetupDest   -ErrorAction SilentlyContinue
 
-            if ($sourceHash -eq $destHash) {
+            # Skip SHA-256 if sizes already differ (fast path); compute hashes only when sizes match
+            $sourceHash = $null
+            $destHash   = $null
+            if ($destItem -and $destItem.Length -eq $sourceItem.Length) {
+                $sourceHash = (Get-FileHash -Path $ccmSetupSource -Algorithm SHA256 -ErrorAction Stop).Hash
+                $destHash   = (Get-FileHash -Path $ccmSetupDest   -Algorithm SHA256 -ErrorAction Stop).Hash
+            }
+
+            if ($sourceHash -and $sourceHash -eq $destHash) {
                 Write-Log "ccmsetup.exe cache is up to date (SHA256: $sourceHash) - skipping copy."
             }
             else {
                 Copy-Item -Path $ccmSetupSource -Destination $ccmSetupCache -Force -ErrorAction Stop
+                if (-not $sourceHash) { $sourceHash = (Get-FileHash -Path $ccmSetupSource -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash }
                 Write-Log "Cached ccmsetup.exe to $ccmSetupCache (SHA256: $sourceHash)."
             }
         }
