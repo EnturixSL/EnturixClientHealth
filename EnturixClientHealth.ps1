@@ -234,7 +234,7 @@ function Test-RunningTaskSequence {
     # Secondary indicator: Active Request Handle written by the TS engine
     $tsKey        = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\SMS\Task Sequence' `
                                      -ErrorAction SilentlyContinue
-    $activeHandle = if ($tsKey) { $tsKey.'Active Request Handle' } else { $null }
+    $activeHandle = if ($tsKey -and ($tsKey.PSObject.Properties.Name -contains 'Active Request Handle')) { $tsKey.'Active Request Handle' } else { $null }
     if ($activeHandle) {
         Write-Log "Task Sequence check: ACTIVE - Active Request Handle found in registry. Skipping all repairs." 'WARN'
         return $true
