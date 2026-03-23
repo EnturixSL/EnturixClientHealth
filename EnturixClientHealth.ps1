@@ -19,7 +19,7 @@
         <ClientInstallProperties>- (optional) ccmsetup.exe install properties
         <LogPath>                - (optional) directory where the log file is written
         <Checks>                 - (optional) per-check true/false toggles (all default to true):
-            <TaskSequence>       - exit immediately if a Task Sequence is running
+            <TaskSequence>       - exit immediately if a Task Sequence is running (overrides after 5 consecutive detections)
             <CcmExecService>     - verify SMS Agent Host service is running
             <CcmSDF>             - verify >= 7 .sdf database files exist
             <CcmSQLCELog>        - detect ongoing CCM database corruption
@@ -545,9 +545,28 @@ Write-Log "ConfigFile : $ConfigFile"
 Write-Log "ClientShare: $ClientShare"
 
 # --- Task Sequence guard ---
-if ($checkTaskSequence -and (Test-RunningTaskSequence)) {
-    Write-Log "=== Task Sequence in progress - exiting without repair to avoid disruption. ==="
-    exit 0
+# Tracks consecutive TS detections; overrides the guard after 5 runs so repairs
+# are not blocked indefinitely by a stuck/phantom task sequence.
+if ($checkTaskSequence) {
+    $tsStateFile = Join-Path $LogPath 'ts_guard.txt'
+    if (Test-RunningTaskSequence) {
+        # Append current timestamp and keep the last 5 entries
+        $prev = if (Test-Path $tsStateFile) {
+            @(Get-Content $tsStateFile -ErrorAction SilentlyContinue | Select-Object -Last 4)
+        } else { @() }
+        $prev + (Get-Date -Format 'o') | Set-Content $tsStateFile -Force -ErrorAction SilentlyContinue
+        $hitCount = ($prev.Count + 1)
+
+        if ($hitCount -ge 5) {
+            Write-Log "Task Sequence guard: OVERRIDE - TS detected in $hitCount consecutive runs. Proceeding with health checks." 'WARN'
+        } else {
+            Write-Log "=== Task Sequence in progress - exiting without repair ($hitCount/5 runs before override). ==="
+            exit 0
+        }
+    } else {
+        # Clean run — reset the consecutive-detection counter
+        if (Test-Path $tsStateFile) { Remove-Item $tsStateFile -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 # --- Run health checks ---
