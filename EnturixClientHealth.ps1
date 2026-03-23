@@ -18,6 +18,7 @@
         <ClientShare>            - (required) UNC or local path to the folder containing ccmsetup.exe
         <ClientInstallProperties>- (optional) ccmsetup.exe install properties
         <LogPath>                - (optional) directory where the log file is written
+        <RegistryHive>           - (optional) registry path for run state (default: HKLM:\SOFTWARE\EnturixClientHealth)
         <Checks>                 - (optional) per-check true/false toggles (all default to true):
             <TaskSequence>       - exit immediately if a Task Sequence is running (overrides after 5 consecutive detections)
             <CcmExecService>     - verify SMS Agent Host service is running
@@ -506,12 +507,14 @@ catch {
 $ClientShare             = ($cfg.Configuration.ClientShare             -as [string]).Trim()
 $ClientInstallProperties = ($cfg.Configuration.ClientInstallProperties -as [string]).Trim()
 $LogPath                 = ($cfg.Configuration.LogPath                 -as [string]).Trim()
+$RegistryHive            = ($cfg.Configuration.RegistryHive            -as [string]).Trim()
 
 if (-not $ClientShare) {
     Write-Error "Configuration error: <ClientShare> is missing or empty in '$ConfigFile'."
     exit 3
 }
-if (-not $LogPath) { $LogPath = 'C:\EnturixClientHealth' }
+if (-not $LogPath)      { $LogPath      = 'C:\EnturixClientHealth' }
+if (-not $RegistryHive) { $RegistryHive = 'HKLM:\SOFTWARE\EnturixClientHealth' }
 
 # --- Load check toggles (default true when element is missing/empty) ---
 function Read-CheckSwitch {
@@ -527,6 +530,24 @@ $checkWMIHealth      = Read-CheckSwitch ($cfg.Configuration.Checks.WMIHealth    
 $checkCcmWMIClass    = Read-CheckSwitch ($cfg.Configuration.Checks.CcmWMIClass     -as [string])
 $checkProvisioningMode = Read-CheckSwitch ($cfg.Configuration.Checks.ProvisioningMode -as [string])
 $checkCCMClientSDK     = Read-CheckSwitch ($cfg.Configuration.Checks.CCMClientSDK      -as [string])
+
+# --- Registry state helpers ---
+function Initialize-RegistryHive {
+    if (-not (Test-Path $RegistryHive)) {
+        New-Item -Path $RegistryHive -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
+function Set-HealthState {
+    param([string]$Result)
+    try {
+        Initialize-RegistryHive
+        Set-ItemProperty -Path $RegistryHive -Name 'LastRunTime'   -Value (Get-Date -Format 'o') -Type String -Force
+        Set-ItemProperty -Path $RegistryHive -Name 'LastRunResult' -Value $Result                -Type String -Force
+        Set-ItemProperty -Path $RegistryHive -Name 'LastRunUser'   -Value $env:USERNAME          -Type String -Force
+    }
+    catch { Write-Log "WARNING: Could not write state to registry ($RegistryHive): $_" 'WARN' }
+}
 
 # --- Check-only mode: intentionally defaults to false (unlike check toggles which default to true)
 #     because silently skipping all repairs would be a surprising/unsafe default. ---
@@ -545,27 +566,32 @@ Write-Log "ConfigFile : $ConfigFile"
 Write-Log "ClientShare: $ClientShare"
 
 # --- Task Sequence guard ---
-# Tracks consecutive TS detections; overrides the guard after 5 runs so repairs
-# are not blocked indefinitely by a stuck/phantom task sequence.
+# Tracks consecutive TS detections in the registry; overrides after 5 runs so
+# repairs are not blocked indefinitely by a stuck/phantom task sequence.
 if ($checkTaskSequence) {
-    $tsStateFile = Join-Path $LogPath 'ts_guard.txt'
     if (Test-RunningTaskSequence) {
-        # Append current timestamp and keep the last 5 entries
-        $prev = if (Test-Path $tsStateFile) {
-            @(Get-Content $tsStateFile -ErrorAction SilentlyContinue | Select-Object -Last 4)
-        } else { @() }
-        $prev + (Get-Date -Format 'o') | Set-Content $tsStateFile -Force -ErrorAction SilentlyContinue
-        $hitCount = ($prev.Count + 1)
+        $hitCount = 0
+        try { $hitCount = [int](Get-ItemProperty -Path $RegistryHive -Name 'TSConsecutiveCount' -ErrorAction SilentlyContinue).TSConsecutiveCount } catch {}
+        $hitCount++
+        try {
+            Initialize-RegistryHive
+            Set-ItemProperty -Path $RegistryHive -Name 'TSConsecutiveCount' -Value $hitCount              -Type DWord  -Force
+            Set-ItemProperty -Path $RegistryHive -Name 'TSLastDetected'     -Value (Get-Date -Format 'o') -Type String -Force
+        } catch {}
 
         if ($hitCount -ge 5) {
             Write-Log "Task Sequence guard: OVERRIDE - TS detected in $hitCount consecutive runs. Proceeding with health checks." 'WARN'
         } else {
             Write-Log "=== Task Sequence in progress - exiting without repair ($hitCount/5 runs before override). ==="
+            Set-HealthState 'TSBlocked'
             exit 0
         }
     } else {
         # Clean run — reset the consecutive-detection counter
-        if (Test-Path $tsStateFile) { Remove-Item $tsStateFile -Force -ErrorAction SilentlyContinue }
+        try {
+            Initialize-RegistryHive
+            Set-ItemProperty -Path $RegistryHive -Name 'TSConsecutiveCount' -Value 0 -Type DWord -Force
+        } catch {}
     }
 }
 
@@ -651,11 +677,13 @@ if (-not $needsRepair) {
         Write-Log "ccmsetup.exe not found at $ccmSetupSource - skipping cache." 'WARN'
     }
 
+    Set-HealthState 'Healthy'
     exit 0
 }
 
 if ($checkOnly) {
     Write-Log "=== Check-only mode: repairs skipped. Client needs attention. ===" 'WARN'
+    Set-HealthState 'CheckOnly'
     exit 1
 }
 
@@ -683,6 +711,7 @@ $reinstallSuccess = Invoke-CCMSetupReinstall -Share $ClientShare -InstallPropert
 
 if (-not $reinstallSuccess) {
     Write-Log "=== Reinstall failed. Manual intervention may be required. ===" 'ERROR'
+    Set-HealthState 'RepairFailed'
     exit 2
 }
 
@@ -693,10 +722,12 @@ Start-Sleep -Seconds 30
 Write-Log "--- Final validation ---"
 if (Test-PostRepairHealth) {
     Write-Log "=== Remediation completed successfully. ==="
+    Set-HealthState 'Repaired'
     exit 0
 }
 else {
     Write-Log "=== Remediation completed but validation found issues. Review log: $LogFile ===" 'WARN'
+    Set-HealthState 'RepairIncomplete'
     exit 1
 }
 

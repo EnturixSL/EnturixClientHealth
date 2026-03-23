@@ -39,6 +39,13 @@
         CCMClientSDK    - Verify root\ccm\ClientSDK is accessible (Software Center data layer)
     -->
     <!--
+        RegistryHive (optional)
+        Registry path where run state is written (LastRunTime, LastRunResult, etc.).
+        Defaults to HKLM:\SOFTWARE\EnturixClientHealth if omitted or left empty.
+    -->
+    <RegistryHive>HKLM:\SOFTWARE\EnturixClientHealth</RegistryHive>
+
+    <!--
         CheckOnly (optional)
         Set to true to run all checks and log results without performing any repairs.
         The script exits with code 1 if issues are found, 0 if healthy.
