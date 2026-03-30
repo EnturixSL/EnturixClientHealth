@@ -231,13 +231,12 @@ function Test-CcmWMIClass {
 #      actively executing. Avoids the false positives produced by process/registry checks.
 #   2. TSManager.exe process with a 5-second recheck — filters out transient lingering
 #      after TS completion (the main source of false positives in naive implementations).
-#   3. Active Request Handle registry key — tertiary fallback.
 function Test-RunningTaskSequence {
     # 1. COM object: only accessible while the TS engine is running
     try {
         $tsEnv  = New-Object -COMObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
-        $tsName = try { $tsEnv.Value('_SMSTSPackageName') } catch { '' }
-        Write-Log "Task Sequence check: ACTIVE - TS environment bound (package: '$tsName'). Skipping all repairs." 'WARN'
+        $tsType = try { $tsEnv.Value('_SMSTSType') } catch { '' }
+        Write-Log "Task Sequence check: ACTIVE - TS environment bound (type: '$tsType'). Skipping all repairs." 'WARN'
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tsEnv) | Out-Null } catch {}
         return $true
     }
@@ -252,17 +251,6 @@ function Test-RunningTaskSequence {
             Write-Log "Task Sequence check: ACTIVE - TSManager.exe confirmed after recheck. Skipping all repairs." 'WARN'
             return $true
         }
-    }
-
-    # 3. Active Request Handle registry key written by the TS engine
-    $tsKey        = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\SMS\Task Sequence' `
-                                     -ErrorAction SilentlyContinue
-    $activeHandle = if ($tsKey -and ($tsKey.PSObject.Properties.Name -contains 'Active Request Handle')) {
-                        $tsKey.'Active Request Handle'
-                    } else { $null }
-    if ($activeHandle) {
-        Write-Log "Task Sequence check: ACTIVE - Active Request Handle present in registry. Skipping all repairs." 'WARN'
-        return $true
     }
 
     Write-Log "Task Sequence check: OK - no running Task Sequence detected."
