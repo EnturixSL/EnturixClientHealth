@@ -90,7 +90,7 @@ function Write-Log {
                 Remove-Item -Force -ErrorAction SilentlyContinue
             Rename-Item -Path $LogFile -NewName "${logBase}_${stamp}${logExt}" -Force -ErrorAction SilentlyContinue
         }
-        Add-Content -Path $LogFile -Value $entry -ErrorAction SilentlyContinue
+        Add-Content -Path $LogFile -Value $entry -ErrorAction Continue
     }
 }
 
@@ -225,19 +225,43 @@ function Test-CcmWMIClass {
 
 # Returns $true if a Task Sequence is currently executing (OSD or software deployment).
 # When a TS is running all repairs are skipped to avoid disrupting the deployment.
+#
+# Detection strategy (ordered by reliability, per autoitconsulting.com):
+#   1. Microsoft.SMS.TSEnvironment COM object — definitive; only bindable while a TS is
+#      actively executing. Avoids the false positives produced by process/registry checks.
+#   2. TSManager.exe process with a 5-second recheck — filters out transient lingering
+#      after TS completion (the main source of false positives in naive implementations).
+#   3. Active Request Handle registry key — tertiary fallback.
 function Test-RunningTaskSequence {
-    # Primary indicator: TSManager.exe process created by the TS engine
-    if (Get-Process -Name TSManager -ErrorAction SilentlyContinue) {
-        Write-Log "Task Sequence check: ACTIVE - TSManager.exe is running. Skipping all repairs." 'WARN'
+    # 1. COM object: only accessible while the TS engine is running
+    try {
+        $tsEnv  = New-Object -COMObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
+        $tsName = try { $tsEnv.Value('_SMSTSPackageName') } catch { '' }
+        Write-Log "Task Sequence check: ACTIVE - TS environment bound (package: '$tsName'). Skipping all repairs." 'WARN'
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tsEnv) | Out-Null } catch {}
         return $true
     }
+    catch {
+        # Expected when no TS is running — fall through to secondary checks
+    }
 
-    # Secondary indicator: Active Request Handle written by the TS engine
+    # 2. TSManager.exe with recheck to filter post-completion lingering
+    if (Get-Process -Name TSManager -ErrorAction SilentlyContinue) {
+        Start-Sleep -Seconds 5
+        if (Get-Process -Name TSManager -ErrorAction SilentlyContinue) {
+            Write-Log "Task Sequence check: ACTIVE - TSManager.exe confirmed after recheck. Skipping all repairs." 'WARN'
+            return $true
+        }
+    }
+
+    # 3. Active Request Handle registry key written by the TS engine
     $tsKey        = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\SMS\Task Sequence' `
                                      -ErrorAction SilentlyContinue
-    $activeHandle = if ($tsKey -and ($tsKey.PSObject.Properties.Name -contains 'Active Request Handle')) { $tsKey.'Active Request Handle' } else { $null }
+    $activeHandle = if ($tsKey -and ($tsKey.PSObject.Properties.Name -contains 'Active Request Handle')) {
+                        $tsKey.'Active Request Handle'
+                    } else { $null }
     if ($activeHandle) {
-        Write-Log "Task Sequence check: ACTIVE - Active Request Handle found in registry. Skipping all repairs." 'WARN'
+        Write-Log "Task Sequence check: ACTIVE - Active Request Handle present in registry. Skipping all repairs." 'WARN'
         return $true
     }
 
@@ -722,12 +746,10 @@ Start-Sleep -Seconds 30
 Write-Log "--- Final validation ---"
 if (Test-PostRepairHealth) {
     Write-Log "=== Remediation completed successfully. ==="
-    Set-HealthState 'Repaired'
     exit 0
 }
 else {
     Write-Log "=== Remediation completed but validation found issues. Review log: $LogFile ===" 'WARN'
-    Set-HealthState 'RepairIncomplete'
     exit 1
 }
 
